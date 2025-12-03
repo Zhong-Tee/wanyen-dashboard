@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wanyen Sales Report Dashboard</title>
+    
+    <!-- Scripts & Styles -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <!-- SheetJS for Excel Support -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js"></script>
+
+    <style>
+        body { font-family: 'Sarabun', sans-serif; background-color: #f3f4f6; }
+        .card { background: white; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); transition: transform 0.2s; }
+        .card:hover { transform: translateY(-2px); }
+        .loader { border: 4px solid #f3f3f3; border-top: 4px solid #3b82f6; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        /* Scrollbar styling */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    </style>
+</head>
+<body>
+
+    <!-- Main Application Container -->
+    <div id="app" class="min-h-screen flex flex-col">
+        
+        <!-- Navigation Bar -->
+        <nav class="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-50">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex flex-col md:flex-row justify-between h-auto md:h-16 py-2 md:py-0">
+                    <div class="flex items-center mb-2 md:mb-0">
+                        <i class="fa-solid fa-chart-line text-blue-600 text-2xl mr-3"></i>
+                        <h1 class="text-xl font-bold text-gray-800">Wanyen Sales Report</h1>
+                    </div>
+                    
+                    <div class="flex flex-wrap items-center gap-2 w-full md:w-auto">
+                        <!-- Google Sheet Input (Pre-filled) -->
+                        <div class="flex items-center bg-gray-50 border rounded-lg px-2 py-1 flex-1 md:flex-none">
+                            <i class="fa-brands fa-google text-green-600 mr-2"></i>
+                            <!-- Pre-filled URL here -->
+                            <input type="text" id="gSheetUrl" 
+                                   value="https://docs.google.com/spreadsheets/d/e/2PACX-1vSm3HnirYTWSape0bexkc1ryRSinM-jD-jSxjO8AVg6cJ6njkdrW0dd96sRC8aHPP28L6QmeXPUOCax/pub?gid=1042994610&single=true&output=csv" 
+                                   placeholder="วางลิงก์ Google Sheet (CSV)..." 
+                                   class="bg-transparent text-sm outline-none w-full md:w-80 placeholder-gray-400 text-gray-600 truncate">
+                            <button onclick="fetchGoogleSheet()" class="ml-2 bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1.5 rounded-md transition whitespace-nowrap shadow-sm">
+                                <i class="fa-solid fa-cloud-arrow-down mr-1"></i> ดึงข้อมูล
+                            </button>
+                        </div>
+
+                        <!-- Legacy File Input (Backup) -->
+                        <label for="fileInput" class="cursor-pointer text-gray-400 hover:text-gray-600 p-2 rounded-full hover:bg-gray-100 transition" title="สำรอง: นำเข้าไฟล์ Excel/CSV จากเครื่อง">
+                            <i class="fa-solid fa-file-excel text-lg"></i>
+                        </label>
+                        <input type="file" id="fileInput" accept=".csv, .xlsx, .xls" class="hidden">
+
+                        <!-- Status & Clear -->
+                        <div id="authStatus" class="text-xs text-gray-500 flex items-center bg-gray-100 px-2 py-1 rounded-md whitespace-nowrap border border-gray-200">
+                            <span class="loader w-3 h-3 mr-1"></span> ...
+                        </div>
+                        <button onclick="dataService.clearData()" class="text-red-400 hover:text-red-600 text-xs px-2 py-1 rounded hover:bg-red-50" title="ล้างข้อมูลทั้งหมด">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
+
+            <!-- Filters -->
+            <div class="bg-white p-4 rounded-xl shadow-sm mb-6 flex flex-col lg:flex-row gap-4 items-center justify-between">
+                
+                <!-- Date Range Manual -->
+                <div class="flex items-center gap-2 flex-wrap w-full lg:w-auto">
+                    <span class="text-gray-600 font-medium"><i class="fa-regular fa-calendar mr-1"></i> ช่วงวันที่:</span>
+                    <input type="date" id="startDate" class="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                    <span class="text-gray-400">-</span>
+                    <input type="date" id="endDate" class="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                </div>
+
+                <!-- Quick Filters & Month Picker -->
+                <div class="flex flex-wrap items-center gap-2 w-full lg:w-auto justify-end">
+                    <!-- Month Picker -->
+                    <div class="flex items-center gap-2 mr-2 bg-gray-50 px-2 py-1 rounded-lg border border-gray-200">
+                        <span class="text-xs text-gray-500 font-medium">ดูรายเดือน:</span>
+                        <input type="month" id="monthPicker" onchange="selectMonth(this.value)" class="bg-transparent border-none text-sm focus:ring-0 outline-none text-gray-700 p-0 cursor-pointer">
+                    </div>
+
+                    <div class="h-6 w-px bg-gray-300 mx-1 hidden sm:block"></div>
+
+                    <button onclick="setFilter('week')" class="px-3 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 rounded-md text-gray-700 transition">7 วัน</button>
+                    <button onclick="setFilter('month')" class="px-3 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 rounded-md text-gray-700 transition">เดือนนี้</button>
+                    <button onclick="setFilter('all')" class="px-3 py-1.5 text-sm bg-blue-100 text-blue-700 font-medium rounded-md hover:bg-blue-200 transition">ทั้งหมด</button>
+                </div>
+            </div>
+
+            <!-- KPI Cards -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                <!-- Total Sales -->
+                <div class="card p-6 border-l-4 border-blue-500">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <p class="text-sm font-medium text-gray-500">ยอดขายรวม (Total Sales)</p>
+                            <h3 class="text-2xl font-bold text-gray-800 mt-1" id="totalSales">฿0.00</h3>
+                        </div>
+                        <div class="p-2 bg-blue-50 rounded-lg text-blue-600">
+                            <i class="fa-solid fa-wallet text-xl"></i>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Total Qty -->
+                <div class="card p-6 border-l-4 border-emerald-500">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <p class="text-sm font-medium text-gray-500">จำนวนที่ขายได้ (Qty)</p>
+                            <h3 class="text-2xl font-bold text-gray-800 mt-1" id="totalQty">0 ชิ้น</h3>
+                        </div>
+                        <div class="p-2 bg-emerald-50 rounded-lg text-emerald-600">
+                            <i class="fa-solid fa-box text-xl"></i>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Avg Sales -->
+                <div class="card p-6 border-l-4 border-amber-500">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <p class="text-sm font-medium text-gray-500">ยอดขายเฉลี่ยต่อวัน</p>
+                            <h3 class="text-2xl font-bold text-gray-800 mt-1" id="avgSales">฿0.00</h3>
+                        </div>
+                        <div class="p-2 bg-amber-50 rounded-lg text-amber-600">
+                            <i class="fa-solid fa-chart-area text-xl"></i>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Transaction Count -->
+                <div class="card p-6 border-l-4 border-purple-500">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <p class="text-sm font-medium text-gray-500">จำนวนออเดอร์</p>
+                            <h3 class="text-2xl font-bold text-gray-800 mt-1" id="orderCount">0</h3>
+                        </div>
+                        <div class="p-2 bg-purple-50 rounded-lg text-purple-600">
+                            <i class="fa-solid fa-receipt text-xl"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Charts Section 1 -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+                <!-- Main Line Chart -->
+                <div class="card p-6 lg:col-span-2">
+                    <h3 class="text-lg font-bold text-gray-800 mb-4">แนวโน้มยอดขาย (Sales Trend)</h3>
+                    <div class="relative h-72 w-full">
+                        <canvas id="salesChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Branch Chart -->
+                <div class="card p-6">
+                    <h3 class="text-lg font-bold text-gray-800 mb-4">ส่วนแบ่งยอดขายตามสาขา</h3>
+                    <div class="relative h-72 w-full flex justify-center">
+                        <canvas id="branchChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Top Products & Branches Tables -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                <!-- Top Products -->
+                <div class="card p-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-bold text-gray-800">🏆 5 อันดับ สินค้าขายดี</h3>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full text-left text-sm whitespace-nowrap">
+                            <thead class="uppercase tracking-wider border-b-2 border-gray-200 bg-gray-50 text-gray-600">
+                                <tr>
+                                    <th class="px-4 py-3">สินค้า</th>
+                                    <th class="px-4 py-3 text-right">จำนวน</th>
+                                    <th class="px-4 py-3 text-right">ยอดรวม</th>
+                                </tr>
+                            </thead>
+                            <tbody id="topProductsTable" class="divide-y divide-gray-100">
+                                <!-- JS Populated -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Top Branches List -->
+                <div class="card p-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-bold text-gray-800">🏪 5 อันดับ สาขาขายดี</h3>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full text-left text-sm whitespace-nowrap">
+                            <thead class="uppercase tracking-wider border-b-2 border-gray-200 bg-gray-50 text-gray-600">
+                                <tr>
+                                    <th class="px-4 py-3">สาขา</th>
+                                    <th class="px-4 py-3 text-right">ออเดอร์</th>
+                                    <th class="px-4 py-3 text-right">ยอดรวม</th>
+                                </tr>
+                            </thead>
+                            <tbody id="topBranchesTable" class="divide-y divide-gray-100">
+                                <!-- JS Populated -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <script type="module">
+        // --- 1. CONFIGURATION & IMPORTS ---
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, writeBatch, doc, deleteDoc, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- Data Service Abstraction (Handle Online vs Offline) ---
+        class DataService {
+            constructor() {
+                this.mode = 'unknown'; // 'firebase' or 'local'
+                this.db = null;
+                this.auth = null;
+                this.user = null;
+                this.appId = 'wanyen-sales-v1'; 
+                this.localDataKey = 'sales_data_local';
+            }
+
+            async init() {
+                try {
+                    // ========================================================
+                    // YOUR FIREBASE CONFIGURATION
+                    // ========================================================
+                    const myFirebaseConfig = {
+                        apiKey: "AIzaSyAd_CMkapSdfehIK5ID5GdyG50E37CVDQc",
+                        authDomain: "wanyensalesdata.firebaseapp.com",
+                        projectId: "wanyensalesdata",
+                        storageBucket: "wanyensalesdata.firebasestorage.app",
+                        messagingSenderId: "128069817586",
+                        appId: "1:128069817586:web:f04bec8435eadc77882c6b",
+                        measurementId: "G-83NLM7WB40"
+                    };
+                    // ========================================================
+
+                    let configToUse = myFirebaseConfig;
+                    if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+                        // configToUse = JSON.parse(__firebase_config); 
+                    }
+
+                    const app = initializeApp(configToUse);
+                    this.auth = getAuth(app);
+                    this.db = getFirestore(app);
+                    
+                    onAuthStateChanged(this.auth, (user) => {
+                        this.user = user;
+                        if (user) {
+                            this.mode = 'firebase';
+                            this.updateStatusUI(true, 'Online');
+                            this.setupRealtimeListener();
+                        } else {
+                            this.updateStatusUI(false, 'Disconnected');
+                        }
+                    });
+
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                        await signInWithCustomToken(this.auth, __initial_auth_token);
+                    } else {
+                        try {
+                            await signInAnonymously(this.auth);
+                        } catch (authError) {
+                            console.error("Auth Error:", authError);
+                             if (authError.code === 'auth/operation-not-allowed') {
+                                alert("⚠️ กรุณาเปิด Anonymous Auth ใน Firebase Console");
+                            }
+                            throw authError;
+                        }
+                    }
+
+                } catch (error) {
+                    console.warn("Switching to Offline Mode.", error);
+                    this.mode = 'local';
+                    this.updateStatusUI(true, 'Offline');
+                    this.loadLocalData();
+                }
+            }
+
+            updateStatusUI(connected, text) {
+                const el = document.getElementById('authStatus');
+                if (connected) {
+                    const colorClass = this.mode === 'firebase' ? 'text-green-600' : 'text-orange-600';
+                    const icon = this.mode === 'firebase' ? 'fa-cloud' : 'fa-database';
+                    el.innerHTML = `<span class="${colorClass} font-bold flex items-center"><i class="fa-solid ${icon} mr-2"></i> ${text}</span>`;
+                } else {
+                    el.innerHTML = `<span class="text-red-500 flex items-center"><i class="fa-solid fa-circle-exclamation mr-1"></i> ${text}</span>`;
+                }
+            }
+
+            setupRealtimeListener() {
+                if (this.mode !== 'firebase' || !this.user) return;
+                const q = query(collection(this.db, 'artifacts', this.appId, 'users', this.user.uid, 'sales_data'));
+                onSnapshot(q, (snapshot) => {
+                    allSalesData = [];
+                    snapshot.forEach((doc) => {
+                        allSalesData.push({ id: doc.id, ...doc.data() });
+                    });
+                    processDataLoad();
+                }, (error) => console.error("Listener Error:", error));
+            }
+
+            loadLocalData() {
+                if (this.mode !== 'local') return;
+                const localStr = localStorage.getItem(this.localDataKey);
+                allSalesData = localStr ? JSON.parse(localStr) : [];
+                processDataLoad();
+            }
+
+            async uploadData(dataArray) {
+                const el = document.getElementById('authStatus');
+                el.innerHTML = `<span class="loader w-3 h-3 mr-1"></span> Sync...`;
+
+                try {
+                    if (this.mode === 'firebase' && this.user) {
+                        let count = 0;
+                        for (const item of dataArray) {
+                            await addDoc(collection(this.db, 'artifacts', this.appId, 'users', this.user.uid, 'sales_data'), item);
+                            count++;
+                        }
+                    } else if (this.mode === 'local') {
+                        const current = JSON.parse(localStorage.getItem(this.localDataKey) || "[]");
+                        localStorage.setItem(this.localDataKey, JSON.stringify([...current, ...dataArray]));
+                        this.loadLocalData();
+                    }
+                    alert(`✅ ดึงข้อมูลสำเร็จ ${dataArray.length} รายการ`);
+                } catch (e) {
+                    console.error("Save Error:", e);
+                    alert("เกิดข้อผิดพลาด: " + e.message);
+                } finally {
+                    if (this.mode === 'firebase') this.updateStatusUI(true, 'Online');
+                    else this.updateStatusUI(true, 'Offline');
+                }
+            }
+
+            async clearData() {
+                if (!confirm("⚠️ คุณต้องการลบข้อมูลทั้งหมดใช่หรือไม่?")) return;
+                
+                if (this.mode === 'firebase' && this.user) {
+                    const q = query(collection(this.db, 'artifacts', this.appId, 'users', this.user.uid, 'sales_data'));
+                    const snapshot = await getDocs(q);
+                    const batch = writeBatch(this.db);
+                    snapshot.docs.forEach((doc) => batch.delete(doc.ref));
+                    await batch.commit();
+                } else if (this.mode === 'local') {
+                    localStorage.removeItem(this.localDataKey);
+                    this.loadLocalData();
+                }
+            }
+        }
+
+        // --- GLOBAL VARIABLES & INIT ---
+        let allSalesData = [];
+        let filteredSalesData = [];
+        let charts = {}; 
+        
+        const dataService = new DataService();
+        window.dataService = dataService;
+        dataService.init();
+
+        // --- GOOGLE SHEET & FILE HANDLER ---
+
+        // NEW: More robust fetch function
+        window.fetchGoogleSheet = async () => {
+            const url = document.getElementById('gSheetUrl').value.trim();
+            if (!url) return alert("กรุณาวางลิงก์ Google Sheet (CSV) ก่อนครับ");
+
+            document.getElementById('authStatus').innerHTML = `<span class="loader w-3 h-3 mr-1"></span> Fetching...`;
+
+            try {
+                // 1. Fetch data directly first (better for error handling)
+                const response = await fetch(url, { cache: "no-store" });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP Error: ${response.status} ${response.statusText}`);
+                }
+
+                const csvText = await response.text();
+
+                // 2. Parse the text
+                Papa.parse(csvText, {
+                    header: true,
+                    skipEmptyLines: true,
+                    complete: (results) => {
+                        const validData = results.data
+                            .map(normalizeRowData)
+                            .filter(x => x !== null);
+                        
+                        if (validData.length > 0) {
+                            dataService.uploadData(validData);
+                        } else {
+                            alert("⚠️ เชื่อมต่อได้ แต่ไม่พบข้อมูลที่ถูกต้อง\n1. ตรวจสอบชื่อหัวตาราง (ต้องมี 'วันที่', 'สินค้า', 'ยอดรวม')\n2. ตรวจสอบว่าเป็นแผ่นงานที่ถูกต้องใน Google Sheet");
+                            restoreStatus();
+                        }
+                    },
+                    error: (err) => {
+                         throw err;
+                    }
+                });
+
+            } catch (err) {
+                console.error(err);
+                restoreStatus();
+                // Specific advice for common errors
+                if (err.message.includes('Failed to fetch') || err.message.includes('NetworkError')) {
+                    alert("❌ เชื่อมต่อ Google Sheet ไม่ได้ (CORS Error)\n\nสาเหตุ: Browser ของคุณบล็อคการดึงข้อมูลจากเว็บอื่นเมื่อเปิดไฟล์จากเครื่อง (file://)\n\nวิธีแก้:\n1. ลองเปิดไฟล์นี้ผ่านเว็บ Hosting (เช่น Netlify) แทนการเปิดจากเครื่อง\n2. หรือใช้ปุ่ม 'สำรอง' (รูป Excel) เพื่อโหลดไฟล์ .csv มาอัพโหลดเองครับ");
+                } else {
+                    alert("❌ เกิดข้อผิดพลาด: " + err.message + "\n(ตรวจสอบว่ากด Publish to web > CSV หรือยัง?)");
+                }
+            }
+        };
+
+        function restoreStatus() {
+            dataService.updateStatusUI(true, dataService.mode === 'firebase' ? 'Online' : 'Offline');
+        }
+
+        function parseThaiDate(dateString) {
+            if (!dateString) return null;
+            if (dateString instanceof Date) return dateString.toISOString();
+            
+            try {
+                if (!isNaN(dateString) && typeof dateString === 'number') {
+                     const date = new Date(Math.round((dateString - 25569)*86400*1000));
+                     return date.toISOString();
+                }
+                const parts = dateString.split(' ');
+                const dateParts = parts[0].split('/');
+                const timePart = parts[1] || "00:00:00";
+                
+                let day = parseInt(dateParts[0]);
+                let month = parseInt(dateParts[1]);
+                let year = parseInt(dateParts[2]);
+
+                if (year > 2400) year -= 543;
+
+                return `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}T${timePart}`;
+            } catch (e) {
+                const d = new Date(dateString);
+                if (!isNaN(d)) return d.toISOString();
+                return null;
+            }
+        }
+
+        function normalizeRowData(row) {
+            // Flexible Key Matching
+            const totalRaw = row['ยอดรวม'] || row['total'] || row['Total'] || "0";
+            const total = typeof totalRaw === 'number' ? totalRaw : parseFloat(String(totalRaw).replace(/,/g, ''));
+
+            const qtyRaw = row['จำนวน'] || row['quantity'] || row['Qty'] || 0;
+            const quantity = typeof qtyRaw === 'number' ? qtyRaw : parseFloat(qtyRaw);
+
+            const product = row['สินค้า'] || row['product'] || row['Product'] || "Unknown";
+            const dateRaw = row['วันที่'] || row['date'] || row['Date'];
+            
+            // If date is missing, skip
+            if (!dateRaw) return null;
+            
+            const dateIso = parseThaiDate(dateRaw);
+            if (!product || isNaN(total) || !dateIso) return null;
+
+            return {
+                rowNumber: row['Row Number'] || null,
+                dateRaw: dateRaw,
+                dateIso: dateIso,
+                orderId: row['เลขที่'] || row['Order ID'] || null,
+                product: product,
+                quantity: quantity,
+                total: total,
+                branch: row['branch'] || row['Branch'] || "Main",
+                payment: row['payment'] || "Cash"
+            };
+        }
+
+        // File Input Handler (Legacy)
+        document.getElementById('fileInput').addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const name = file.name.toLowerCase();
+            if (name.endsWith('.csv')) {
+                Papa.parse(file, {
+                    header: true,
+                    skipEmptyLines: true,
+                    complete: (results) => {
+                        const validData = results.data.map(normalizeRowData).filter(x => x !== null);
+                        if (validData.length > 0) dataService.uploadData(validData);
+                        else alert("ไม่พบข้อมูล");
+                    }
+                });
+            } else if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                    const jsonData = XLSX.utils.sheet_to_json(firstSheet, { defval: "" });
+                    const validData = jsonData.map(normalizeRowData).filter(x => x !== null);
+                    if (validData.length > 0) dataService.uploadData(validData);
+                    else alert("ไม่พบข้อมูล");
+                };
+                reader.readAsArrayBuffer(file);
+            }
+            event.target.value = '';
+        });
+
+        // --- DASHBOARD UI LOGIC ---
+
+        function processDataLoad() {
+             if(allSalesData.length > 0) {
+                const dates = allSalesData.map(d => new Date(d.dateIso)).filter(d => !isNaN(d));
+                if (dates.length > 0 && !document.getElementById('startDate').value) {
+                    const minDate = new Date(Math.min.apply(null, dates));
+                    const maxDate = new Date(Math.max.apply(null, dates));
+                     document.getElementById('startDate').value = minDate.toISOString().split('T')[0];
+                     document.getElementById('endDate').value = maxDate.toISOString().split('T')[0];
+                }
+            }
+            applyFilters();
+        }
+
+        function applyFilters() {
+            const startStr = document.getElementById('startDate').value;
+            const endStr = document.getElementById('endDate').value;
+            
+            if (!startStr || !endStr) {
+                filteredSalesData = [...allSalesData];
+            } else {
+                const start = new Date(startStr);
+                const end = new Date(endStr);
+                end.setHours(23, 59, 59);
+                filteredSalesData = allSalesData.filter(item => {
+                    const d = new Date(item.dateIso);
+                    return d >= start && d <= end;
+                });
+            }
+            updateDashboard();
+        }
+
+        window.setFilter = (type) => {
+            if (allSalesData.length === 0) return;
+            const today = new Date();
+            const end = new Date();
+            let start = new Date();
+
+            if (type === 'week') start.setDate(today.getDate() - 7);
+            else if (type === 'month') start = new Date(today.getFullYear(), today.getMonth(), 1);
+            else if (type === 'all') {
+                const dates = allSalesData.map(d => new Date(d.dateIso));
+                start = new Date(Math.min.apply(null, dates));
+            }
+            document.getElementById('startDate').value = start.toISOString().split('T')[0];
+            document.getElementById('endDate').value = end.toISOString().split('T')[0];
+            applyFilters();
+        };
+
+        // NEW FUNCTION: Select Specific Month
+        window.selectMonth = (value) => {
+            if (!value) return;
+            const [year, month] = value.split('-');
+            
+            // Construct YYYY-MM-01 and End of Month
+            const startDate = `${year}-${month}-01`;
+            
+            // Get last day of the month
+            const lastDay = new Date(year, month, 0).getDate();
+            const endDate = `${year}-${month}-${lastDay}`;
+            
+            document.getElementById('startDate').value = startDate;
+            document.getElementById('endDate').value = endDate;
+            applyFilters();
+        };
+
+        document.getElementById('startDate').addEventListener('change', applyFilters);
+        document.getElementById('endDate').addEventListener('change', applyFilters);
+
+        function updateDashboard() {
+            const totalSales = filteredSalesData.reduce((sum, item) => sum + (item.total || 0), 0);
+            const totalQty = filteredSalesData.reduce((sum, item) => sum + (item.quantity || 0), 0);
+            
+            const uniqueDates = new Set(filteredSalesData.map(item => item.dateIso.split('T')[0]));
+            const avgSales = totalSales / (uniqueDates.size || 1);
+
+            document.getElementById('totalSales').innerText = `฿${totalSales.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+            document.getElementById('totalQty').innerText = `${totalQty.toLocaleString()} ชิ้น`;
+            document.getElementById('avgSales').innerText = `฿${avgSales.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+            document.getElementById('orderCount').innerText = filteredSalesData.length.toLocaleString();
+
+            updateRankings();
+            renderCharts();
+        }
+
+        function updateRankings() {
+            const productMap = {};
+            const branchMap = {};
+
+            filteredSalesData.forEach(item => {
+                if (!productMap[item.product]) productMap[item.product] = { name: item.product, qty: 0, total: 0 };
+                productMap[item.product].qty += item.quantity;
+                productMap[item.product].total += item.total;
+                
+                const bName = item.branch || "Unknown";
+                if (!branchMap[bName]) branchMap[bName] = { name: bName, count: 0, total: 0 };
+                branchMap[bName].count += 1;
+                branchMap[bName].total += item.total;
+            });
+
+            const topProducts = Object.values(productMap).sort((a, b) => b.qty - a.qty).slice(0, 5);
+            const topBranches = Object.values(branchMap).sort((a, b) => b.total - a.total).slice(0, 5);
+
+            document.getElementById('topProductsTable').innerHTML = topProducts.map(p => `
+                <tr class="hover:bg-gray-50 transition">
+                    <td class="px-4 py-3 font-medium text-gray-800">${p.name}</td>
+                    <td class="px-4 py-3 text-right text-gray-600">${p.qty.toLocaleString()}</td>
+                    <td class="px-4 py-3 text-right font-medium text-blue-600">฿${p.total.toLocaleString()}</td>
+                </tr>
+            `).join('');
+
+            document.getElementById('topBranchesTable').innerHTML = topBranches.map(b => `
+                <tr class="hover:bg-gray-50 transition">
+                    <td class="px-4 py-3 font-medium text-gray-800 truncate max-w-xs" title="${b.name}">${b.name.substring(0, 30)}${b.name.length > 30 ? '...' : ''}</td>
+                    <td class="px-4 py-3 text-right text-gray-600">${b.count.toLocaleString()}</td>
+                    <td class="px-4 py-3 text-right font-medium text-blue-600">฿${b.total.toLocaleString()}</td>
+                </tr>
+            `).join('');
+        }
+
+        function renderCharts() {
+            const salesByDate = {};
+            filteredSalesData.forEach(item => {
+                const dateKey = item.dateIso.split('T')[0];
+                salesByDate[dateKey] = (salesByDate[dateKey] || 0) + item.total;
+            });
+            const sortedDates = Object.keys(salesByDate).sort();
+            const salesData = sortedDates.map(d => salesByDate[d]);
+
+            const branchMap = {};
+            filteredSalesData.forEach(item => {
+                const bName = (item.branch || "Other").substring(0, 15);
+                branchMap[bName] = (branchMap[bName] || 0) + item.total;
+            });
+            
+            let branchEntries = Object.entries(branchMap).sort((a, b) => b[1] - a[1]);
+            if (branchEntries.length > 8) {
+                const otherTotal = branchEntries.slice(8).reduce((sum, entry) => sum + entry[1], 0);
+                branchEntries = branchEntries.slice(0, 8);
+                branchEntries.push(["Others", otherTotal]);
+            }
+            
+            const branchLabels = branchEntries.map(e => e[0]);
+            const branchData = branchEntries.map(e => e[1]);
+
+            if (charts.sales) charts.sales.destroy();
+            if (charts.branch) charts.branch.destroy();
+
+            const ctxSales = document.getElementById('salesChart').getContext('2d');
+            charts.sales = new Chart(ctxSales, {
+                type: 'line',
+                data: {
+                    labels: sortedDates,
+                    datasets: [{
+                        label: 'ยอดขาย',
+                        data: salesData,
+                        borderColor: '#3b82f6',
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 3
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { beginAtZero: true, grid: { borderDash: [2, 4] } },
+                        x: { grid: { display: false } }
+                    }
+                }
+            });
+
+            const ctxBranch = document.getElementById('branchChart').getContext('2d');
+            charts.branch = new Chart(ctxBranch, {
+                type: 'doughnut',
+                data: {
+                    labels: branchLabels,
+                    datasets: [{
+                        data: branchData,
+                        backgroundColor: [
+                            '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', 
+                            '#6366f1', '#14b8a6', '#f97316', '#94a3b8'
+                        ],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } }
+                    }
+                }
+            });
+        }
+    </script>
+</body>
+</html>
