@@ -443,32 +443,53 @@
             dataService.updateStatusUI(true, dataService.mode === 'firebase' ? 'Online' : 'Offline');
         }
 
-        function parseThaiDate(dateString) {
-            if (!dateString) return null;
-            if (dateString instanceof Date) return dateString.toISOString();
-            
-            try {
-                if (!isNaN(dateString) && typeof dateString === 'number') {
-                     const date = new Date(Math.round((dateString - 25569)*86400*1000));
-                     return date.toISOString();
-                }
-                const parts = dateString.split(' ');
-                const dateParts = parts[0].split('/');
-                const timePart = parts[1] || "00:00:00";
-                
-                let day = parseInt(dateParts[0]);
-                let month = parseInt(dateParts[1]);
-                let year = parseInt(dateParts[2]);
+function parseThaiDate(dateString) {
+    if (!dateString) return null;
 
-                if (year > 2400) year -= 543;
+    // ถ้าเป็น Date object อยู่แล้ว
+    if (dateString instanceof Date) {
+        return dateString.toISOString();
+    }
 
-                return `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}T${timePart}`;
-            } catch (e) {
-                const d = new Date(dateString);
-                if (!isNaN(d)) return d.toISOString();
-                return null;
-            }
+    try {
+        // กรณีเป็นเลข serial ของ Excel / Google Sheets
+        if (!isNaN(dateString) && typeof dateString === 'number') {
+            const date = new Date(Math.round((dateString - 25569) * 86400 * 1000));
+            return date.toISOString();
         }
+
+        // ตัดเวลาออกก่อน  "1/11/2568 10:04:37" -> "1/11/2568"
+        const parts = String(dateString).trim().split(' ');
+        const datePart = parts[0];
+        const timePart = parts[1] || "00:00:00";
+
+        // แยกวัน/เดือน/ปี   "1/11/2568" -> [1,11,2568]
+        const dateParts = datePart.split('/');
+        if (dateParts.length !== 3) {
+            // ลองให้ JS แปลงเองดูเป็นทางเลือกสุดท้าย
+            const d = new Date(dateString);
+            return isNaN(d) ? null : d.toISOString();
+        }
+
+        let day = parseInt(dateParts[0]);
+        let month = parseInt(dateParts[1]);
+        let year = parseInt(dateParts[2]);
+
+        // ถ้าเป็น พ.ศ. ให้ลบ 543 -> ค.ศ.
+        if (year > 2400) year -= 543;
+
+        const d2 = new Date(year, month - 1, day);
+        if (isNaN(d2)) return null;
+
+        // คืนค่าแบบ ISO มีเวลาไว้ใช้ filter ได้
+        return `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}T${timePart}`;
+    } catch (e) {
+        const d = new Date(dateString);
+        if (!isNaN(d)) return d.toISOString();
+        return null;
+    }
+}
+
 
 function normalizeRowData(row) {
     // --- ยอดรวม ---
@@ -746,4 +767,5 @@ function normalizeRowData(row) {
     </script>
 </body>
 </html>
+
 
