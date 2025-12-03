@@ -470,35 +470,47 @@
             }
         }
 
-        function normalizeRowData(row) {
-            // Flexible Key Matching
-            const totalRaw = row['ยอดรวม'] || row['total'] || row['Total'] || "0";
-            const total = typeof totalRaw === 'number' ? totalRaw : parseFloat(String(totalRaw).replace(/,/g, ''));
+function normalizeRowData(row) {
+    // --- ยอดรวม ---
+    const totalRaw = row['ยอดรวม'] || row['total'] || row['Total'] || "0";
+    const total = typeof totalRaw === 'number'
+        ? totalRaw
+        : parseFloat(String(totalRaw).replace(/,/g, '').trim());
 
-            const qtyRaw = row['จำนวน'] || row['quantity'] || row['Qty'] || 0;
-            const quantity = typeof qtyRaw === 'number' ? qtyRaw : parseFloat(qtyRaw);
+    // --- จำนวน ---
+    const qtyRaw = row['จำนวน'] || row['quantity'] || row['Qty'] || 1;
+    const quantity = typeof qtyRaw === 'number'
+        ? qtyRaw
+        : (parseFloat(String(qtyRaw).trim()) || 1);
 
-            const product = row['สินค้า'] || row['product'] || row['Product'] || "Unknown";
-            const dateRaw = row['วันที่'] || row['date'] || row['Date'];
-            
-            // If date is missing, skip
-            if (!dateRaw) return null;
-            
-            const dateIso = parseThaiDate(dateRaw);
-            if (!product || isNaN(total) || !dateIso) return null;
+    // --- สินค้า (บังคับต้องมี) ---
+    const productRaw = row['สินค้า'] || row['product'] || row['Product'];
+    const product = productRaw && String(productRaw).trim();
+    // ถ้าไม่มีชื่อสินค้า → ไม่เอาแถวนี้
+    if (!product) return null;
 
-            return {
-                rowNumber: row['Row Number'] || null,
-                dateRaw: dateRaw,
-                dateIso: dateIso,
-                orderId: row['เลขที่'] || row['Order ID'] || null,
-                product: product,
-                quantity: quantity,
-                total: total,
-                branch: row['branch'] || row['Branch'] || "Main",
-                payment: row['payment'] || "Cash"
-            };
-        }
+    // --- วันที่ (บังคับต้องมี) ---
+    const dateRaw = row['วันที่'] || row['date'] || row['Date'];
+    if (!dateRaw) return null;
+
+    const dateIso = parseThaiDate(dateRaw);
+
+    // ถ้า parse วันที่ไม่สำเร็จ หรือยอดรวมไม่ใช่ตัวเลข → ทิ้ง
+    if (!dateIso || isNaN(total)) return null;
+
+    return {
+        rowNumber: row['Row'] || row['Row Number'] || null,
+        dateRaw: dateRaw,
+        dateIso: dateIso,
+        orderId: row['เลขที่'] || row['Order ID'] || null,
+        product: product,
+        quantity: quantity,
+        total: total,
+        branch: row['branch'] || row['Branch'] || "Main",
+        payment: row['payment'] || row['Payment'] || "Cash"
+    };
+}
+
 
         // File Input Handler (Legacy)
         document.getElementById('fileInput').addEventListener('change', (event) => {
@@ -734,3 +746,4 @@
     </script>
 </body>
 </html>
+
